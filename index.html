@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Análise de Decibéis</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Light gray background */
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .card {
+            background-color: #ffffff;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto; /* Ensures responsiveness */
+        }
+    </style>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container">
+        <h1 class="text-3xl font-bold text-center text-gray-900 mb-8 rounded-lg p-4 bg-white shadow-md">
+            Dashboard de Análise de Decibéis
+        </h1>
+
+        <div class="card">
+            <h2 class="text-xl font-semibold mb-4">Filtrar Dados por Período</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label for="startDate" class="block text-sm font-medium text-gray-700">Data e Hora de Início:</label>
+                    <input type="datetime-local" id="startDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2">
+                </div>
+                <div>
+                    <label for="endDate" class="block text-sm font-medium text-gray-700">Data e Hora de Fim:</label>
+                    <input type="datetime-local" id="endDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2">
+                </div>
+            </div>
+            <button id="filterBtn" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-150 ease-in-out">
+                Aplicar Filtro
+            </button>
+        </div>
+
+        <div class="card">
+            <h2 class="text-xl font-semibold mb-4">Gráfico de Decibéis ao Longo do Tempo</h2>
+            <canvas id="decibelChart"></canvas>
+            <p id="loadingMessage" class="text-center text-gray-500 mt-4 hidden">Carregando dados...</p>
+            <p id="errorMessage" class="text-center text-red-500 mt-4 hidden">Erro ao carregar dados.</p>
+            <p id="noDataMessage" class="text-center text-gray-500 mt-4 hidden">Nenhum dado encontrado para o período selecionado.</p>
+        </div>
+    </div>
+
+    <script>
+        // Referência aos elementos HTML
+        const startDateInput = document.getElementById('startDate');
+        const endDateInput = document.getElementById('endDate');
+        const filterBtn = document.getElementById('filterBtn');
+        const decibelChartCanvas = document.getElementById('decibelChart');
+        const loadingMessage = document.getElementById('loadingMessage');
+        const errorMessage = document.getElementById('errorMessage');
+        const noDataMessage = document.getElementById('noDataMessage');
+
+        let decibelChart; // Variável para armazenar a instância do gráfico
+
+        // URL base do seu backend Flask (IMPORTANTE: substitua pelo URL do seu backend hospedado!)
+        // Se estiver a testar localmente, será algo como 'http://localhost:3000' (ou a porta que você configurou).
+        // Após a hospedagem num serviço como o Render, será o URL público do seu serviço.
+        // Exemplo: 'https://seu-servico-flask.onrender.com'
+        const API_BASE_URL = 'https://3000-firebase-iotlunar-1748815570790.cluster-iesosxm5fzdewqvhlwn5qivgry.cloudworkstations.dev'; // <<<<<<< ATUALIZADO AQUI! <<<<<<<
+
+        // Função para formatar a data para o input datetime-local
+        function formatDatetimeLocal(date) {
+            // Garante que a data seja um objeto Date
+            if (!(date instanceof Date)) {
+                date = new Date(date);
+            }
+            const year = date.getFullYear();
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+            const day = date.getDate().toString().padStart(2, '0');
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            return `${year}-${month}-${day}T${hours}:${minutes}`;
+        }
+
+        // Define as datas padrão (últimas 24 horas, por exemplo)
+        function setInitialDateRange() {
+            const now = new Date();
+            const oneDayAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+
+            startDateInput.value = formatDatetimeLocal(oneDayAgo);
+            endDateInput.value = formatDatetimeLocal(now);
+        }
+
+        // Função para buscar os dados da API
+        async function fetchDecibelData(startDate, endDate) {
+            loadingMessage.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+            noDataMessage.classList.add('hidden');
+            decibelChartCanvas.classList.add('hidden'); // Esconde o canvas enquanto carrega
+
+            let url = `${API_BASE_URL}/api/decibeis`;
+            const params = new URLSearchParams();
+
+            if (startDate) {
+                params.append('startDate', startDate);
+            }
+            if (endDate) {
+                params.append('endDate', endDate);
+            }
+
+            if (params.toString()) {
+                url += `?${params.toString()}`;
+            }
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Erro HTTP! Status: ${response.status}`);
+                }
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error("Erro ao buscar dados da API:", error);
+                errorMessage.classList.remove('hidden');
+                return null;
+            } finally {
+                loadingMessage.classList.add('hidden');
+            }
+        }
+
+        // Função para renderizar o gráfico usando Chart.js
+        function renderChart(data) {
+            // Destrói o gráfico existente se houver um
+            if (decibelChart) {
+                decibelChart.destroy();
+            }
+
+            if (!data || data.length === 0) {
+                noDataMessage.classList.remove('hidden');
+                decibelChartCanvas.classList.add('hidden');
+                return;
+            }
+
+            noDataMessage.classList.add('hidden');
+            decibelChartCanvas.classList.remove('hidden');
+
+            const labels = data.map(item => new Date(item.data)); // Datas para o eixo X
+            const values = data.map(item => item.valor); // Valores para o eixo Y
+
+            decibelChart = new Chart(decibelChartCanvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Nível de Decibéis (dB)',
+                        data: values,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false, // Permite que o gráfico se ajuste melhor ao contêiner
+                    scales: {
+                        x: {
+                            type: 'time', // Usar tipo 'time' para datas
+                            time: {
+                                unit: 'minute', // Adapta a unidade de tempo automaticamente
+                                displayFormats: {
+                                    minute: 'HH:mm',
+                                    hour: 'HH:mm',
+                                    day: 'MMM dd',
+                                    month: 'MMM'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Data e Hora'
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Decibéis (dB)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    // Formata o título do tooltip para mostrar a data e hora completas
+                                    const date = new Date(context[0].label);
+                                    return date.toLocaleString('pt-BR');
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Evento para o botão de filtro
+        filterBtn.addEventListener('click', async () => {
+            const startDate = startDateInput.value;
+            const endDate = endDateInput.value;
+            const data = await fetchDecibelData(startDate, endDate);
+            if (data) {
+                renderChart(data);
+            }
+        });
+
+        // Carrega os dados iniciais ao carregar a página
+        document.addEventListener('DOMContentLoaded', async () => {
+            setInitialDateRange(); // Define o range de datas inicial
+            const startDate = startDateInput.value;
+            const endDate = endDateInput.value;
+            const data = await fetchDecibelData(startDate, endDate);
+            if (data) {
+                renderChart(data);
+            }
+        });
+    </script>
+</body>
+</html>
